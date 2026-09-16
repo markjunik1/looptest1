@@ -28,7 +28,8 @@ public struct VideoPicker: UIViewControllerRepresentable {
         var config = PHPickerConfiguration()
         config.filter = .videos
         config.selectionLimit = 1
-        config.preferredAssetRepresentationMode = .fastest
+        // .current entrega o arquivo original imediatamente sem tentar converter
+        config.preferredAssetRepresentationMode = .current
         let picker = PHPickerViewController(configuration: config)
         picker.delegate = context.coordinator
         return picker
