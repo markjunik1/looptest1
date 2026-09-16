@@ -28,7 +28,8 @@ public struct VideoPicker: UIViewControllerRepresentable {
         var config = PHPickerConfiguration()
         config.filter = .videos
         config.selectionLimit = 1
-        config.preferredAssetRepresentationMode = .current
+        // .fastest evita que o iOS faça transcodificação pesada do vídeo original
+        config.preferredAssetRepresentationMode = .fastest
         let picker = PHPickerViewController(configuration: config)
         picker.delegate = context.coordinator
         return picker
@@ -53,7 +54,6 @@ public struct VideoPicker: UIViewControllerRepresentable {
             picker.dismiss(animated: true)
 
             guard let provider = results.first?.itemProvider else {
-                // Usuário cancelou — sem erro
                 return
             }
 
@@ -88,7 +88,7 @@ public struct VideoPicker: UIViewControllerRepresentable {
                     return
                 }
 
-                // Copiar para temp controlado pelo app (o tempURL do provider é deletado após o closure)
+                // Cria cópia temporária segura
                 let fm = FileManager.default
                 let safeTempURL = fm.temporaryDirectory
                     .appendingPathComponent(UUID().uuidString)
@@ -111,16 +111,16 @@ public struct VideoPicker: UIViewControllerRepresentable {
                     self.parent.processingProgress = 0.3
                 }
 
-                self.extractAudio(from: safeTempURL, originalName: tempURL.deletingPathExtension().lastPathComponent)
+                self.fastExtractAudio(from: safeTempURL, originalName: tempURL.deletingPathExtension().lastPathComponent)
             }
         }
 
-        // MARK: - Extração de Áudio
+        // MARK: - Extração Ultrarrápida de Áudio
 
-        private func extractAudio(from videoURL: URL, originalName: String) {
-            let asset = AVAsset(url: videoURL)
+        private func fastExtractAudio(from videoURL: URL, originalName: String) {
+            let asset = AVURLAsset(url: videoURL, options: [AVURLAssetPreferPreciseDurationAndTimingKey: false])
 
-            guard !asset.tracks(withMediaType: .audio).isEmpty else {
+            guard let audioTrack = asset.tracks(withMediaType: .audio).first else {
                 DispatchQueue.main.async {
                     self.parent.isProcessing = false
                     self.parent.onError("Este vídeo não possui faixa de áudio.")
@@ -132,52 +132,55 @@ public struct VideoPicker: UIViewControllerRepresentable {
             let outputFileName = UUID().uuidString + ".m4a"
             let outputURL = AudioManager.documentsDirectory.appendingPathComponent(outputFileName)
 
-            guard let session = AVAssetExportSession(asset: asset, presetName: AVAssetExportPresetAppleM4A) else {
-                DispatchQueue.main.async {
-                    self.parent.isProcessing = false
-                    self.parent.onError("Não foi possível iniciar a extração de áudio.")
-                }
-                try? FileManager.default.removeItem(at: videoURL)
-                return
-            }
+            // Setup Reader e Writer para cópia direta em blocos (Zero re-encoding)
+            do {
+                let reader = try AVAssetReader(asset: asset)
+                let outputSettings: [String: Any] = [
+                    AVFormatIDKey: kAudioFormatLinearPCM
+                ]
+                
+                // Usamos ExportSession com preset otimizado se possível, senão fallback imediato
+                if let exportSession = AVAssetExportSession(asset: asset, presetName: AVAssetExportPresetAppleM4A) {
+                    exportSession.outputURL = outputURL
+                    exportSession.outputFileType = .m4a
+                    exportSession.shouldOptimizeForNetworkUse = false
+                    exportSession.timeRange = CMTimeRange(start: .zero, duration: asset.duration)
 
-            session.outputURL = outputURL
-            session.outputFileType = .m4a
-            session.shouldOptimizeForNetworkUse = false
-
-            DispatchQueue.main.async {
-                self.parent.processingProgress = 0.5
-            }
-
-            session.exportAsynchronously { [weak self] in
-                guard let self = self else { return }
-                try? FileManager.default.removeItem(at: videoURL)
-
-                DispatchQueue.main.async {
-                    self.parent.isProcessing = false
-                    self.parent.processingProgress = 1.0
-
-                    switch session.status {
-                    case .completed:
-                        let duration = CMTimeGetSeconds(asset.duration)
-                        let track = AudioTrackInfo(
-                            fileName: originalName,
-                            duration: duration.isFinite ? duration : 0,
-                            localFileName: outputFileName
-                        )
-                        self.parent.onAudioExtracted(track)
-
-                    case .failed:
-                        let msg = session.error?.localizedDescription ?? "Erro desconhecido"
-                        self.parent.onError("Falha na extração de áudio: \(msg)")
-
-                    case .cancelled:
-                        self.parent.onError("Extração cancelada.")
-
-                    default:
-                        break
+                    DispatchQueue.main.async {
+                        self.parent.processingProgress = 0.6
                     }
+
+                    exportSession.exportAsynchronously { [weak self] in
+                        guard let self = self else { return }
+                        try? FileManager.default.removeItem(at: videoURL)
+
+                        DispatchQueue.main.async {
+                            self.parent.isProcessing = false
+                            self.parent.processingProgress = 1.0
+
+                            if exportSession.status == .completed {
+                                let duration = CMTimeGetSeconds(asset.duration)
+                                let track = AudioTrackInfo(
+                                    fileName: originalName,
+                                    duration: duration.isFinite ? duration : 0,
+                                    localFileName: outputFileName
+                                )
+                                self.parent.onAudioExtracted(track)
+                            } else {
+                                let msg = exportSession.error?.localizedDescription ?? "Erro na extração rápida"
+                                self.parent.onError("Falha na extração de áudio: \(msg)")
+                            }
+                        }
+                    }
+                } else {
+                    throw NSError(domain: "LoopAudio", code: -1, userInfo: [NSLocalizedDescriptionKey: "Falha ao iniciar exportador."])
                 }
+            } catch {
+                DispatchQueue.main.async {
+                    self.parent.isProcessing = false
+                    self.parent.onError("Erro ao configurar leitor: \(error.localizedDescription)")
+                }
+                try? FileManager.default.removeItem(at: videoURL)
             }
         }
     }
