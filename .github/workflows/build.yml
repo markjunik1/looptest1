@@ -1,0 +1,57 @@
+name: Build LoopAudio iOS
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Compilar para iPhone (macOS + Xcode)
+    runs-on: macos-15
+
+    steps:
+      - name: Baixar codigo
+        uses: actions/checkout@v4
+
+      - name: Selecionar Xcode
+        run: |
+          sudo xcode-select -s /Applications/Xcode_16.2.app/Contents/Developer
+          xcodebuild -version
+
+      - name: Listar schemes
+        run: |
+          cd LoopAudio
+          xcodebuild -list -project LoopAudio.xcodeproj
+
+      - name: Compilar e arquivar
+        run: |
+          cd LoopAudio
+          xcodebuild \
+            -project LoopAudio.xcodeproj \
+            -scheme LoopAudio \
+            -configuration Release \
+            -destination "generic/platform=iOS" \
+            -archivePath "$RUNNER_TEMP/LoopAudio.xcarchive" \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO \
+            archive
+
+      - name: Empacotar .ipa
+        run: |
+          APP_PATH="$RUNNER_TEMP/LoopAudio.xcarchive/Products/Applications/LoopAudio.app"
+          mkdir -p Payload
+          cp -r "$APP_PATH" Payload/
+          zip -r LoopAudio.ipa Payload
+          echo "IPA gerado com sucesso!"
+          ls -lh LoopAudio.ipa
+
+      - name: Upload do .ipa como artefato
+        uses: actions/upload-artifact@v4
+        with:
+          name: LoopAudio-iPhone-ipa
+          path: LoopAudio.ipa
+          retention-days: 14
