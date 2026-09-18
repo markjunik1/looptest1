@@ -55,14 +55,14 @@ public struct ContentView: View {
                 dismissButton: .default(Text("OK"))
             )
         }
-        .onChange(of: audio.errorMessage) { _, newMsg in
-            if let newMsg = newMsg {
+        .onChange(of: audio.errorMessage) { msg in
+            if let newMsg = msg {
                 alertMessage = newMsg
                 showAlert = true
                 audio.errorMessage = nil
             }
         }
-        .onChange(of: audio.currentRateFactor) { _, _ in
+        .onChange(of: audio.currentRateFactor) { _ in
             withAnimation(.easeInOut(duration: 0.3)) {
                 modulationPulse = true
             }
@@ -82,7 +82,7 @@ public struct ContentView: View {
                 Image(systemName: "repeat.circle.fill")
                     .font(.system(size: 26, weight: .bold))
                     .foregroundColor(.accentColor)
-                Text("ÁUDIO EM LOOP")
+                Text("AUDIO EM LOOP")
                     .font(.system(size: 20, weight: .bold, design: .rounded))
                     .tracking(1.2)
             }
@@ -109,7 +109,7 @@ public struct ContentView: View {
                             .font(.system(size: 16, weight: .semibold))
                             .lineLimit(2)
                     } else {
-                        Text("Nenhum vídeo selecionado")
+                        Text("Nenhum video selecionado")
                             .font(.system(size: 15))
                             .foregroundColor(.secondary)
                     }
@@ -207,7 +207,7 @@ public struct ContentView: View {
                     VStack(alignment: .leading, spacing: 2) {
                         Text("Modo Live Anti-Deteccao")
                             .font(.system(size: 15, weight: .semibold))
-                        Text(audio.isAntiDetectionEnabled ? "Modula a cada 7s — Anti-Bot TikTok/Kwai" : "Desativado — Loop identico")
+                        Text(audio.isAntiDetectionEnabled ? "Modula a cada 7s — Anti-Bot TikTok" : "Desativado — Loop identico")
                             .font(.caption2)
                             .foregroundColor(.secondary)
                     }
