@@ -4,33 +4,33 @@ import MediaPlayer
 import Combine
 
 public enum AntiDetectionIntensity: String, CaseIterable, Identifiable, Codable {
-    case subtle = "Leve"
+    case natural = "Natural"
     case balanced = "Moderado"
-    case dynamic = "Avançado"
+    case shielded = "Blindado (Audível)"
 
     public var id: String { rawValue }
 
     public var rateRange: ClosedRange<Float> {
         switch self {
-        case .subtle: return 0.993...1.007
-        case .balanced: return 0.985...1.015
-        case .dynamic: return 0.975...1.025
+        case .natural: return 0.980...1.020   // ±2.0%
+        case .balanced: return 0.955...1.045  // ±4.5% (Recomendado)
+        case .shielded: return 0.930...1.070  // ±7.0% (Audível e anti-ban máximo)
         }
     }
 
     public var volumeJitter: ClosedRange<Float> {
         switch self {
-        case .subtle: return 0.98...1.01
-        case .balanced: return 0.96...1.02
-        case .dynamic: return 0.94...1.03
+        case .natural: return 0.97...1.02
+        case .balanced: return 0.94...1.04
+        case .shielded: return 0.91...1.06
         }
     }
 
     public var microPauseRange: ClosedRange<Double> {
         switch self {
-        case .subtle: return 0.05...0.15
+        case .natural: return 0.05...0.15
         case .balanced: return 0.10...0.30
-        case .dynamic: return 0.18...0.45
+        case .shielded: return 0.20...0.55
         }
     }
 }
@@ -55,7 +55,7 @@ public final class AudioManager: NSObject, ObservableObject, AVAudioPlayerDelega
         }
     }
 
-    // MARK: - Modo Live Anti-Detecção
+    // MARK: - Modo Live Anti-Detecção 2.0
     @Published public var isAntiDetectionEnabled: Bool = true {
         didSet {
             updateLoopMode()
@@ -72,7 +72,7 @@ public final class AudioManager: NSObject, ObservableObject, AVAudioPlayerDelega
         }
     }
 
-    @Published public var antiDetectionIntensity: AntiDetectionIntensity = .balanced {
+    @Published public var antiDetectionIntensity: AntiDetectionIntensity = .shielded {
         didSet {
             if let encoded = try? JSONEncoder().encode(antiDetectionIntensity) {
                 UserDefaults.standard.set(encoded, forKey: "LoopAudio_antiDetectionIntensity")
@@ -85,6 +85,7 @@ public final class AudioManager: NSObject, ObservableObject, AVAudioPlayerDelega
 
     @Published public private(set) var loopCycleCount: Int = 1
     @Published public private(set) var currentRateFactor: Float = 1.0
+    @Published public private(set) var lastModulationTime: Date = Date()
 
     @Published public private(set) var currentTrack: AudioTrackInfo?
     @Published public private(set) var currentTime: TimeInterval = 0
@@ -113,8 +114,6 @@ public final class AudioManager: NSObject, ObservableObject, AVAudioPlayerDelega
         loadPersistedTrack()
     }
 
-    // MARK: - Audio Session
-
     public func setupAudioSession() {
         do {
             let session = AVAudioSession.sharedInstance()
@@ -127,8 +126,6 @@ public final class AudioManager: NSObject, ObservableObject, AVAudioPlayerDelega
             }
         }
     }
-
-    // MARK: - Carregar e Reproduzir
 
     public func loadAudio(track: AudioTrackInfo, startImmediately: Bool = true) {
         stop()
@@ -228,16 +225,27 @@ public final class AudioManager: NSObject, ObservableObject, AVAudioPlayerDelega
         audioPlayer?.volume = max(0.0, min(1.0, actual))
     }
 
-    // MARK: - Modulação Anti-Detecção
-
-    private func applyRandomizedParameters() {
+    public func applyRandomizedParameters() {
         guard let player = audioPlayer, isAntiDetectionEnabled else { return }
 
         let newRate = Float.random(in: antiDetectionIntensity.rateRange)
         currentRateFactor = newRate
         player.rate = newRate
+        lastModulationTime = Date()
 
         currentJitterVolume = Float.random(in: antiDetectionIntensity.volumeJitter)
+        applyVolume()
+    }
+
+    // Gatilho para o usuário testar e ouvir a variação imediatamente
+    public func triggerInstantVariation() {
+        guard let player = audioPlayer else { return }
+        let current = currentRateFactor
+        let target: Float = current >= 1.0 ? Float.random(in: 0.93...0.96) : Float.random(in: 1.04...1.07)
+        currentRateFactor = target
+        player.rate = target
+        lastModulationTime = Date()
+        currentJitterVolume = Float.random(in: 0.92...1.05)
         applyVolume()
     }
 
@@ -245,15 +253,12 @@ public final class AudioManager: NSObject, ObservableObject, AVAudioPlayerDelega
         stopDriftTimer()
         guard isAntiDetectionEnabled else { return }
 
-        driftTimer = Timer.publish(every: 18.0, on: .main, in: .common)
+        // Modulação frequente a cada 7 segundos para janelas de 15-20s de live
+        driftTimer = Timer.publish(every: 7.0, on: .main, in: .common)
             .autoconnect()
             .sink { [weak self] _ in
                 guard let self = self, self.isPlaying, self.isAntiDetectionEnabled else { return }
-                let nudge = Float.random(in: -0.004...0.004)
-                let range = self.antiDetectionIntensity.rateRange
-                let nextRate = max(range.lowerBound, min(range.upperBound, self.currentRateFactor + nudge))
-                self.currentRateFactor = nextRate
-                self.audioPlayer?.rate = nextRate
+                self.applyRandomizedParameters()
             }
     }
 
@@ -261,8 +266,6 @@ public final class AudioManager: NSObject, ObservableObject, AVAudioPlayerDelega
         driftTimer?.cancel()
         driftTimer = nil
     }
-
-    // MARK: - Progress Timer
 
     private func startProgressTimer() {
         stopProgressTimer()
@@ -278,8 +281,6 @@ public final class AudioManager: NSObject, ObservableObject, AVAudioPlayerDelega
         progressTimer?.cancel()
         progressTimer = nil
     }
-
-    // MARK: - AVAudioPlayerDelegate
 
     public func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully flag: Bool) {
         if !isLoopEnabled {
@@ -318,8 +319,6 @@ public final class AudioManager: NSObject, ObservableObject, AVAudioPlayerDelega
         }
         stop()
     }
-
-    // MARK: - Interrupções de áudio
 
     private func setupInterruptionObserver() {
         NotificationCenter.default.addObserver(
@@ -368,8 +367,6 @@ public final class AudioManager: NSObject, ObservableObject, AVAudioPlayerDelega
         }
     }
 
-    // MARK: - MPRemoteCommandCenter
-
     private func setupRemoteCommands() {
         let center = MPRemoteCommandCenter.shared()
 
@@ -399,8 +396,6 @@ public final class AudioManager: NSObject, ObservableObject, AVAudioPlayerDelega
         }
     }
 
-    // MARK: - MPNowPlayingInfoCenter
-
     private func updateNowPlayingInfo() {
         guard let track = currentTrack else {
             MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
@@ -409,14 +404,12 @@ public final class AudioManager: NSObject, ObservableObject, AVAudioPlayerDelega
 
         var info: [String: Any] = [:]
         info[MPMediaItemPropertyTitle] = track.fileName
-        info[MPMediaItemPropertyArtist] = isAntiDetectionEnabled ? "LoopAudio (Live Shield)" : "LoopAudio"
+        info[MPMediaItemPropertyArtist] = isAntiDetectionEnabled ? "LoopAudio (Live Shield Pro)" : "LoopAudio"
         info[MPMediaItemPropertyPlaybackDuration] = track.duration
         info[MPNowPlayingInfoPropertyElapsedPlaybackTime] = audioPlayer?.currentTime ?? 0
         info[MPNowPlayingInfoPropertyPlaybackRate] = isPlaying ? Double(currentRateFactor) : 0.0
         MPNowPlayingInfoCenter.default().nowPlayingInfo = info
     }
-
-    // MARK: - Arquivos e Persistência
 
     public static var documentsDirectory: URL {
         FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
