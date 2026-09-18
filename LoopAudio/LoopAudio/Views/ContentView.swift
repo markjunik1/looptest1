@@ -16,17 +16,18 @@ public struct ContentView: View {
             Color(UIColor.systemBackground).ignoresSafeArea()
 
             ScrollView {
-                VStack(spacing: 24) {
+                VStack(spacing: 20) {
                     headerSection
                     trackInfoSection
                     playbackControlsSection
+                    antiDetectionSection
                     volumeSection
                     loopToggleSection
                     pickerButtonSection
                     Spacer(minLength: 20)
                 }
                 .padding(.horizontal, 24)
-                .padding(.top, 20)
+                .padding(.top, 16)
             }
 
             if isProcessing {
@@ -53,7 +54,6 @@ public struct ContentView: View {
                 dismissButton: .default(Text("OK"))
             )
         }
-        // Exibir erro do AudioManager como alerta
         .onChange(of: audio.errorMessage) { msg in
             if let msg = msg {
                 alertMessage = msg
@@ -69,17 +69,17 @@ public struct ContentView: View {
         VStack(spacing: 6) {
             HStack(spacing: 8) {
                 Image(systemName: "repeat.circle.fill")
-                    .font(.system(size: 28, weight: .bold))
+                    .font(.system(size: 26, weight: .bold))
                     .foregroundColor(.accentColor)
                 Text("ÁUDIO EM LOOP")
                     .font(.system(size: 20, weight: .bold, design: .rounded))
                     .tracking(1.2)
             }
-            Text("Extrai e repete o áudio de qualquer vídeo")
+            Text("Otimizado para iPhone 11 & Lives sem Bloqueio")
                 .font(.footnote)
                 .foregroundColor(.secondary)
         }
-        .padding(.top, 8)
+        .padding(.top, 4)
     }
 
     private var trackInfoSection: some View {
@@ -137,10 +137,10 @@ public struct ContentView: View {
                 }
             }
         }
-        .padding(18)
+        .padding(16)
         .background(Color(UIColor.secondarySystemGroupedBackground))
         .cornerRadius(16)
-        .shadow(color: Color.black.opacity(0.05), radius: 6, x: 0, y: 2)
+        .shadow(color: Color.black.opacity(0.04), radius: 6, x: 0, y: 2)
     }
 
     private var playbackControlsSection: some View {
@@ -151,7 +151,7 @@ public struct ContentView: View {
                     .font(.system(size: 15, weight: .semibold))
                     .foregroundColor(.white)
                     .frame(maxWidth: .infinity)
-                    .frame(height: 52)
+                    .frame(height: 50)
                     .background(audio.currentTrack != nil && !audio.isPlaying ? Color.blue : Color.gray.opacity(0.35))
                     .cornerRadius(14)
             }
@@ -163,7 +163,7 @@ public struct ContentView: View {
                     .font(.system(size: 15, weight: .semibold))
                     .foregroundColor(.primary)
                     .frame(maxWidth: .infinity)
-                    .frame(height: 52)
+                    .frame(height: 50)
                     .background(Color(UIColor.tertiarySystemFill))
                     .cornerRadius(14)
             }
@@ -174,12 +174,76 @@ public struct ContentView: View {
                 Image(systemName: "stop.fill")
                     .font(.system(size: 18, weight: .bold))
                     .foregroundColor(.red)
-                    .frame(width: 52, height: 52)
+                    .frame(width: 50, height: 50)
                     .background(Color.red.opacity(0.12))
                     .cornerRadius(14)
             }
             .disabled(audio.currentTrack == nil)
         }
+    }
+
+    // MARK: - Modo Live Anti-Detecção Section
+    private var antiDetectionSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                HStack(spacing: 10) {
+                    Image(systemName: "shield.lefthalf.filled.badge.checkmark")
+                        .font(.system(size: 20, weight: .bold))
+                        .foregroundColor(audio.isAntiDetectionEnabled ? .purple : .secondary)
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Modo Live Anti-Detecção")
+                            .font(.system(size: 15, weight: .semibold))
+                        Text(audio.isAntiDetectionEnabled ? "Variação estocástica ativa (Anti-Bot)" : "Desativado (Loop mecânico idêntico)")
+                            .font(.caption2)
+                            .foregroundColor(.secondary)
+                    }
+                }
+                Spacer()
+                Toggle("", isOn: $audio.isAntiDetectionEnabled)
+                    .labelsHidden()
+            }
+
+            if audio.isAntiDetectionEnabled {
+                Divider()
+
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack {
+                        Text("Intensidade:")
+                            .font(.caption)
+                            .fontWeight(.medium)
+                            .foregroundColor(.secondary)
+                        Spacer()
+                        Picker("Intensidade", selection: $audio.antiDetectionIntensity) {
+                            ForEach(AntiDetectionIntensity.allCases) { item in
+                                Text(item.rawValue).tag(item)
+                            }
+                        }
+                        .pickerStyle(SegmentedPickerStyle())
+                        .frame(maxWidth: 220)
+                    }
+
+                    HStack(spacing: 6) {
+                        Circle()
+                            .fill(Color.purple)
+                            .frame(width: 6, height: 6)
+                        Text("Ciclo: #\(audio.loopCycleCount)  |  Taxa: \(String(format: "%.3fx", audio.currentRateFactor))")
+                            .font(.system(size: 11, weight: .medium, design: .monospaced))
+                            .foregroundColor(.purple)
+                    }
+                    .padding(.top, 2)
+                }
+            }
+        }
+        .padding(16)
+        .background(
+            RoundedRectangle(cornerRadius: 16)
+                .fill(Color(UIColor.secondarySystemGroupedBackground))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 16)
+                        .stroke(audio.isAntiDetectionEnabled ? Color.purple.opacity(0.35) : Color.clear, lineWidth: 1.5)
+                )
+        )
     }
 
     private var volumeSection: some View {
@@ -222,7 +286,7 @@ public struct ContentView: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Loop Contínuo")
                         .font(.system(size: 16, weight: .medium))
-                    Text(audio.isLoopEnabled ? "Gapless — reinicia sem intervalo" : "Reproduz apenas uma vez")
+                    Text(audio.isLoopEnabled ? "Reinicia sem parar" : "Reproduz apenas uma vez")
                         .font(.caption)
                         .foregroundColor(.secondary)
                 }
@@ -246,7 +310,7 @@ public struct ContentView: View {
             }
             .foregroundColor(.white)
             .frame(maxWidth: .infinity)
-            .frame(height: 56)
+            .frame(height: 54)
             .background(Color.accentColor)
             .cornerRadius(16)
             .shadow(color: Color.accentColor.opacity(0.3), radius: 8, x: 0, y: 4)
@@ -258,23 +322,28 @@ public struct ContentView: View {
         ZStack {
             Color.black.opacity(0.55).ignoresSafeArea()
 
-            VStack(spacing: 18) {
+            VStack(spacing: 16) {
                 ProgressView(value: Double(processingProgress))
-                    .progressViewStyle(CircularProgressViewStyle(tint: .white))
-                    .scaleEffect(1.6)
+                    .progressViewStyle(LinearProgressViewStyle(tint: .blue))
+                    .frame(width: 180)
 
                 Text("Extraindo áudio do vídeo...")
                     .font(.headline)
                     .foregroundColor(.white)
 
-                Text("Processamento 100% local")
-                    .font(.footnote)
+                Text("\(Int(processingProgress * 100))% concluído")
+                    .font(.subheadline)
+                    .fontWeight(.bold)
+                    .foregroundColor(.white)
+
+                Text("Processamento 100% local e ultra rápido")
+                    .font(.caption)
                     .foregroundColor(.white.opacity(0.75))
             }
-            .padding(36)
+            .padding(32)
             .background(
                 RoundedRectangle(cornerRadius: 20)
-                    .fill(Color(UIColor.systemGray6).opacity(0.92))
+                    .fill(Color(UIColor.systemGray6).opacity(0.95))
             )
         }
     }
@@ -284,6 +353,13 @@ public struct ContentView: View {
     private func formatTime(_ seconds: TimeInterval) -> String {
         guard seconds.isFinite, !seconds.isNaN else { return "00:00" }
         let total = Int(seconds.rounded())
-        return String(format: "%02d:%02d", total / 60, total % 60)
+        let hours = total / 3600
+        let minutes = (total % 3600) / 60
+        let s = total % 60
+        if hours > 0 {
+            return String(format: "%d:%02d:%02d", hours, minutes, s)
+        } else {
+            return String(format: "%02d:%02d", minutes, s)
+        }
     }
 }
