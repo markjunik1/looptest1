@@ -6,12 +6,10 @@ import UniformTypeIdentifiers
 
 public struct VideoPicker: UIViewControllerRepresentable {
 
-    @Binding public var isProcessing: Bool
-    @Binding public var processingProgress: Float
-    public var onAudioExtracted: (AudioTrackInfo) -> Void
-    public var onError: (String) -> Void
-
-    @Environment(\.presentationMode) private var presentationMode
+    @Binding var isProcessing: Bool
+    @Binding var processingProgress: Float
+    var onAudioExtracted: (AudioTrackInfo) -> Void
+    var onError: (String) -> Void
 
     public init(
         isProcessing: Binding<Bool>,
@@ -30,6 +28,7 @@ public struct VideoPicker: UIViewControllerRepresentable {
         config.filter = .videos
         config.selectionLimit = 1
         config.preferredAssetRepresentationMode = .current
+
         let picker = PHPickerViewController(configuration: config)
         picker.delegate = context.coordinator
         return picker
@@ -51,16 +50,11 @@ public struct VideoPicker: UIViewControllerRepresentable {
         public func picker(_ picker: PHPickerViewController, didFinishPicking results: [PHPickerResult]) {
             picker.dismiss(animated: true)
 
-            guard let result = results.first else {
-                return
-            }
+            guard let result = results.first else { return }
 
-            DispatchQueue.main.async {
-                self.parent.isProcessing = true
-                self.parent.processingProgress = 0.05
-            }
+            parent.isProcessing = true
+            parent.processingProgress = 0.1
 
-            // ESTRATÉGIA 1: PhotoKit Direto (Zero cópias de disco - Instantâneo para vídeos longos)
             if let assetIdentifier = result.assetIdentifier {
                 let fetchResult = PHAsset.fetchAssets(withLocalIdentifiers: [assetIdentifier], options: nil)
                 if let phAsset = fetchResult.firstObject {
@@ -69,7 +63,6 @@ public struct VideoPicker: UIViewControllerRepresentable {
                 }
             }
 
-            // ESTRATÉGIA 2: Fallback caso o identificador não esteja disponível
             self.loadViaItemProvider(provider: result.itemProvider)
         }
 
@@ -85,7 +78,7 @@ public struct VideoPicker: UIViewControllerRepresentable {
             }
 
             let resources = PHAssetResource.assetResources(for: phAsset)
-            let originalName = resources.first?.originalFilename ?? "Vídeo_Galeria"
+            let originalName = resources.first?.originalFilename ?? "Video_Galeria"
 
             PHImageManager.default().requestAVAsset(forVideo: phAsset, options: options) { [weak self] avAsset, _, info in
                 guard let self = self else { return }
@@ -125,7 +118,7 @@ public struct VideoPicker: UIViewControllerRepresentable {
                 if let error = error {
                     DispatchQueue.main.async {
                         self.parent.isProcessing = false
-                        self.parent.onError("Erro ao acessar vídeo: \(error.localizedDescription)")
+                        self.parent.onError("Erro ao acessar video: \(error.localizedDescription)")
                     }
                     return
                 }
@@ -133,7 +126,7 @@ public struct VideoPicker: UIViewControllerRepresentable {
                 guard let tempURL = tempURL else {
                     DispatchQueue.main.async {
                         self.parent.isProcessing = false
-                        self.parent.onError("Arquivo de vídeo indisponível.")
+                        self.parent.onError("Arquivo de video indisponivel.")
                     }
                     return
                 }
@@ -153,7 +146,7 @@ public struct VideoPicker: UIViewControllerRepresentable {
                   let sourceAudioTrack = asset.tracks(withMediaType: .audio).first else {
                 DispatchQueue.main.async {
                     self.parent.isProcessing = false
-                    self.parent.onError("Este vídeo não possui nenhuma faixa de áudio.")
+                    self.parent.onError("Este video nao possui nenhuma faixa de audio.")
                 }
                 return
             }
@@ -163,7 +156,7 @@ public struct VideoPicker: UIViewControllerRepresentable {
             } catch {
                 DispatchQueue.main.async {
                     self.parent.isProcessing = false
-                    self.parent.onError("Falha ao isolar áudio: \(error.localizedDescription)")
+                    self.parent.onError("Falha ao isolar audio: \(error.localizedDescription)")
                 }
                 return
             }
@@ -176,7 +169,7 @@ public struct VideoPicker: UIViewControllerRepresentable {
             guard let exportSession = AVAssetExportSession(asset: composition, presetName: AVAssetExportPresetAppleM4A) else {
                 DispatchQueue.main.async {
                     self.parent.isProcessing = false
-                    self.parent.onError("Não foi possível inicializar o conversor de áudio.")
+                    self.parent.onError("Nao foi possivel inicializar o conversor de audio.")
                 }
                 return
             }
@@ -211,7 +204,7 @@ public struct VideoPicker: UIViewControllerRepresentable {
                 try? FileManager.default.removeItem(at: outputURL)
                 DispatchQueue.main.async {
                     self.parent.isProcessing = false
-                    self.parent.onError("Tempo limite excedido ao converter o áudio.")
+                    self.parent.onError("Tempo limite excedido ao converter o audio.")
                 }
                 return
             }
@@ -233,11 +226,11 @@ public struct VideoPicker: UIViewControllerRepresentable {
                 case .failed:
                     try? FileManager.default.removeItem(at: outputURL)
                     let msg = exportSession.error?.localizedDescription ?? "Erro desconhecido"
-                    self.parent.onError("Falha na extração de áudio: \(msg)")
+                    self.parent.onError("Falha na extracao de audio: \(msg)")
 
                 case .cancelled:
                     try? FileManager.default.removeItem(at: outputURL)
-                    self.parent.onError("Extração de áudio cancelada.")
+                    self.parent.onError("Extracao de audio cancelada.")
 
                 default:
                     try? FileManager.default.removeItem(at: outputURL)
