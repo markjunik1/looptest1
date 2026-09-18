@@ -3,6 +3,38 @@ import AVFoundation
 import MediaPlayer
 import Combine
 
+public enum AntiDetectionIntensity: String, CaseIterable, Identifiable, Codable {
+    case subtle = "Leve"
+    case balanced = "Moderado"
+    case dynamic = "Avançado"
+
+    public var id: String { rawValue }
+
+    public var rateRange: ClosedRange<Float> {
+        switch self {
+        case .subtle: return 0.993...1.007
+        case .balanced: return 0.985...1.015
+        case .dynamic: return 0.975...1.025
+        }
+    }
+
+    public var volumeJitter: ClosedRange<Float> {
+        switch self {
+        case .subtle: return 0.98...1.01
+        case .balanced: return 0.96...1.02
+        case .dynamic: return 0.94...1.03
+        }
+    }
+
+    public var microPauseRange: ClosedRange<Double> {
+        switch self {
+        case .subtle: return 0.05...0.15
+        case .balanced: return 0.10...0.30
+        case .dynamic: return 0.18...0.45
+        }
+    }
+}
+
 public final class AudioManager: NSObject, ObservableObject, AVAudioPlayerDelegate {
 
     public static let shared = AudioManager()
@@ -18,10 +50,41 @@ public final class AudioManager: NSObject, ObservableObject, AVAudioPlayerDelega
 
     @Published public var volume: Float = 1.0 {
         didSet {
-            audioPlayer?.volume = volume
+            applyVolume()
             UserDefaults.standard.set(volume, forKey: "LoopAudio_volume")
         }
     }
+
+    // MARK: - Modo Live Anti-Detecção
+    @Published public var isAntiDetectionEnabled: Bool = true {
+        didSet {
+            updateLoopMode()
+            if isAntiDetectionEnabled {
+                applyRandomizedParameters()
+                startDriftTimer()
+            } else {
+                stopDriftTimer()
+                currentRateFactor = 1.0
+                audioPlayer?.rate = 1.0
+                applyVolume()
+            }
+            UserDefaults.standard.set(isAntiDetectionEnabled, forKey: "LoopAudio_isAntiDetectionEnabled")
+        }
+    }
+
+    @Published public var antiDetectionIntensity: AntiDetectionIntensity = .balanced {
+        didSet {
+            if let encoded = try? JSONEncoder().encode(antiDetectionIntensity) {
+                UserDefaults.standard.set(encoded, forKey: "LoopAudio_antiDetectionIntensity")
+            }
+            if isAntiDetectionEnabled {
+                applyRandomizedParameters()
+            }
+        }
+    }
+
+    @Published public private(set) var loopCycleCount: Int = 1
+    @Published public private(set) var currentRateFactor: Float = 1.0
 
     @Published public private(set) var currentTrack: AudioTrackInfo?
     @Published public private(set) var currentTime: TimeInterval = 0
@@ -29,12 +92,21 @@ public final class AudioManager: NSObject, ObservableObject, AVAudioPlayerDelega
 
     private var audioPlayer: AVAudioPlayer?
     private var progressTimer: AnyCancellable?
+    private var driftTimer: AnyCancellable?
+    private var currentJitterVolume: Float = 1.0
 
     override private init() {
         super.init()
         let defaults = UserDefaults.standard
         self.isLoopEnabled = defaults.object(forKey: "LoopAudio_isLoopEnabled") as? Bool ?? true
         self.volume = defaults.object(forKey: "LoopAudio_volume") as? Float ?? 1.0
+        self.isAntiDetectionEnabled = defaults.object(forKey: "LoopAudio_isAntiDetectionEnabled") as? Bool ?? true
+
+        if let data = defaults.data(forKey: "LoopAudio_antiDetectionIntensity"),
+           let intensity = try? JSONDecoder().decode(AntiDetectionIntensity.self, from: data) {
+            self.antiDetectionIntensity = intensity
+        }
+
         setupAudioSession()
         setupRemoteCommands()
         setupInterruptionObserver()
@@ -46,7 +118,6 @@ public final class AudioManager: NSObject, ObservableObject, AVAudioPlayerDelega
     public func setupAudioSession() {
         do {
             let session = AVAudioSession.sharedInstance()
-            // .mixWithOthers: permite coexistir com outros apps (ex: TikTok)
             try session.setCategory(.playback, mode: .default, options: [.mixWithOthers])
             try session.setActive(true, options: .notifyOthersOnDeactivation)
         } catch {
@@ -73,14 +144,22 @@ public final class AudioManager: NSObject, ObservableObject, AVAudioPlayerDelega
             setupAudioSession()
             let player = try AVAudioPlayer(contentsOf: url)
             player.delegate = self
-            player.volume = self.volume
-            player.numberOfLoops = self.isLoopEnabled ? -1 : 0
-            player.prepareToPlay()
+            player.enableRate = true
 
             self.audioPlayer = player
             self.currentTrack = track
             self.currentTime = 0
+            self.loopCycleCount = 1
             self.errorMessage = nil
+
+            updateLoopMode()
+            applyVolume()
+
+            if isAntiDetectionEnabled {
+                applyRandomizedParameters()
+            }
+
+            player.prepareToPlay()
 
             savePersistedTrack(track)
             updateNowPlayingInfo()
@@ -99,6 +178,12 @@ public final class AudioManager: NSObject, ObservableObject, AVAudioPlayerDelega
     public func play() {
         guard let player = audioPlayer else { return }
         setupAudioSession()
+
+        if isAntiDetectionEnabled {
+            applyRandomizedParameters()
+            startDriftTimer()
+        }
+
         if player.play() {
             isPlaying = true
             startProgressTimer()
@@ -111,6 +196,7 @@ public final class AudioManager: NSObject, ObservableObject, AVAudioPlayerDelega
         player.pause()
         isPlaying = false
         stopProgressTimer()
+        stopDriftTimer()
         currentTime = player.currentTime
         updateNowPlayingInfo()
     }
@@ -122,12 +208,58 @@ public final class AudioManager: NSObject, ObservableObject, AVAudioPlayerDelega
         }
         isPlaying = false
         currentTime = 0
+        loopCycleCount = 1
         stopProgressTimer()
+        stopDriftTimer()
         updateNowPlayingInfo()
     }
 
     private func updateLoopMode() {
-        audioPlayer?.numberOfLoops = isLoopEnabled ? -1 : 0
+        guard let player = audioPlayer else { return }
+        if isAntiDetectionEnabled {
+            player.numberOfLoops = 0
+        } else {
+            player.numberOfLoops = isLoopEnabled ? -1 : 0
+        }
+    }
+
+    private func applyVolume() {
+        let actual = isAntiDetectionEnabled ? (volume * currentJitterVolume) : volume
+        audioPlayer?.volume = max(0.0, min(1.0, actual))
+    }
+
+    // MARK: - Modulação Anti-Detecção
+
+    private func applyRandomizedParameters() {
+        guard let player = audioPlayer, isAntiDetectionEnabled else { return }
+
+        let newRate = Float.random(in: antiDetectionIntensity.rateRange)
+        currentRateFactor = newRate
+        player.rate = newRate
+
+        currentJitterVolume = Float.random(in: antiDetectionIntensity.volumeJitter)
+        applyVolume()
+    }
+
+    private func startDriftTimer() {
+        stopDriftTimer()
+        guard isAntiDetectionEnabled else { return }
+
+        driftTimer = Timer.publish(every: 18.0, on: .main, in: .common)
+            .autoconnect()
+            .sink { [weak self] _ in
+                guard let self = self, self.isPlaying, self.isAntiDetectionEnabled else { return }
+                let nudge = Float.random(in: -0.004...0.004)
+                let range = self.antiDetectionIntensity.rateRange
+                let nextRate = max(range.lowerBound, min(range.upperBound, self.currentRateFactor + nudge))
+                self.currentRateFactor = nextRate
+                self.audioPlayer?.rate = nextRate
+            }
+    }
+
+    private func stopDriftTimer() {
+        driftTimer?.cancel()
+        driftTimer = nil
     }
 
     // MARK: - Progress Timer
@@ -150,11 +282,30 @@ public final class AudioManager: NSObject, ObservableObject, AVAudioPlayerDelega
     // MARK: - AVAudioPlayerDelegate
 
     public func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully flag: Bool) {
-        // Só chamado quando numberOfLoops = 0 (loop desligado)
         if !isLoopEnabled {
             isPlaying = false
             currentTime = 0
             stopProgressTimer()
+            stopDriftTimer()
+            updateNowPlayingInfo()
+            return
+        }
+
+        if isAntiDetectionEnabled {
+            loopCycleCount += 1
+
+            let pauseDuration = Double.random(in: antiDetectionIntensity.microPauseRange)
+
+            DispatchQueue.main.asyncAfter(deadline: .now() + pauseDuration) { [weak self] in
+                guard let self = self, self.isLoopEnabled, self.isPlaying else { return }
+                self.applyRandomizedParameters()
+                self.audioPlayer?.currentTime = 0
+                self.audioPlayer?.play()
+                self.updateNowPlayingInfo()
+            }
+        } else {
+            player.currentTime = 0
+            player.play()
             updateNowPlayingInfo()
         }
     }
@@ -168,7 +319,7 @@ public final class AudioManager: NSObject, ObservableObject, AVAudioPlayerDelega
         stop()
     }
 
-    // MARK: - Interrupções de áudio (chamada, Siri, etc.)
+    // MARK: - Interrupções de áudio
 
     private func setupInterruptionObserver() {
         NotificationCenter.default.addObserver(
@@ -212,13 +363,12 @@ public final class AudioManager: NSObject, ObservableObject, AVAudioPlayerDelega
             let reasonValue = info[AVAudioSessionRouteChangeReasonKey] as? UInt,
             let reason = AVAudioSession.RouteChangeReason(rawValue: reasonValue)
         else { return }
-        // Pausar quando fone de ouvido é removido (comportamento padrão iOS)
         if reason == .oldDeviceUnavailable {
             pause()
         }
     }
 
-    // MARK: - MPRemoteCommandCenter (Tela Bloqueada)
+    // MARK: - MPRemoteCommandCenter
 
     private func setupRemoteCommands() {
         let center = MPRemoteCommandCenter.shared()
@@ -259,10 +409,10 @@ public final class AudioManager: NSObject, ObservableObject, AVAudioPlayerDelega
 
         var info: [String: Any] = [:]
         info[MPMediaItemPropertyTitle] = track.fileName
-        info[MPMediaItemPropertyArtist] = "LoopAudio"
+        info[MPMediaItemPropertyArtist] = isAntiDetectionEnabled ? "LoopAudio (Live Shield)" : "LoopAudio"
         info[MPMediaItemPropertyPlaybackDuration] = track.duration
         info[MPNowPlayingInfoPropertyElapsedPlaybackTime] = audioPlayer?.currentTime ?? 0
-        info[MPNowPlayingInfoPropertyPlaybackRate] = isPlaying ? 1.0 : 0.0
+        info[MPNowPlayingInfoPropertyPlaybackRate] = isPlaying ? Double(currentRateFactor) : 0.0
         MPNowPlayingInfoCenter.default().nowPlayingInfo = info
     }
 
@@ -288,7 +438,6 @@ public final class AudioManager: NSObject, ObservableObject, AVAudioPlayerDelega
             let data = UserDefaults.standard.data(forKey: "LoopAudio_currentTrack"),
             let track = try? JSONDecoder().decode(AudioTrackInfo.self, from: data)
         else { return }
-        // Carrega sem auto-play na abertura fria
         loadAudio(track: track, startImmediately: false)
     }
 }
