@@ -63,8 +63,6 @@ public struct ContentView: View {
         }
     }
 
-    // MARK: - Seções
-
     private var headerSection: some View {
         VStack(spacing: 6) {
             HStack(spacing: 8) {
@@ -145,7 +143,6 @@ public struct ContentView: View {
 
     private var playbackControlsSection: some View {
         HStack(spacing: 16) {
-            // Play
             Button(action: { audio.play() }) {
                 Label("Reproduzir", systemImage: "play.fill")
                     .font(.system(size: 15, weight: .semibold))
@@ -157,7 +154,6 @@ public struct ContentView: View {
             }
             .disabled(audio.currentTrack == nil || audio.isPlaying)
 
-            // Pause
             Button(action: { audio.pause() }) {
                 Label("Pausar", systemImage: "pause.fill")
                     .font(.system(size: 15, weight: .semibold))
@@ -169,7 +165,6 @@ public struct ContentView: View {
             }
             .disabled(!audio.isPlaying)
 
-            // Stop
             Button(action: { audio.stop() }) {
                 Image(systemName: "stop.fill")
                     .font(.system(size: 18, weight: .bold))
@@ -182,19 +177,18 @@ public struct ContentView: View {
         }
     }
 
-    // MARK: - Modo Live Anti-Detecção Section
     private var antiDetectionSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 14) {
             HStack {
                 HStack(spacing: 10) {
                     Image(systemName: "shield.lefthalf.filled.badge.checkmark")
-                        .font(.system(size: 20, weight: .bold))
+                        .font(.system(size: 22, weight: .bold))
                         .foregroundColor(audio.isAntiDetectionEnabled ? .purple : .secondary)
 
                     VStack(alignment: .leading, spacing: 2) {
                         Text("Modo Live Anti-Detecção")
                             .font(.system(size: 15, weight: .semibold))
-                        Text(audio.isAntiDetectionEnabled ? "Variação estocástica ativa (Anti-Bot)" : "Desativado (Loop mecânico idêntico)")
+                        Text(audio.isAntiDetectionEnabled ? "Modulação a cada 7s (Anti-Bot TikTok/Kwai)" : "Desativado (Loop idêntico)")
                             .font(.caption2)
                             .foregroundColor(.secondary)
                     }
@@ -207,11 +201,11 @@ public struct ContentView: View {
             if audio.isAntiDetectionEnabled {
                 Divider()
 
-                VStack(alignment: .leading, spacing: 8) {
+                VStack(alignment: .leading, spacing: 10) {
                     HStack {
                         Text("Intensidade:")
                             .font(.caption)
-                            .fontWeight(.medium)
+                            .fontWeight(.bold)
                             .foregroundColor(.secondary)
                         Spacer()
                         Picker("Intensidade", selection: $audio.antiDetectionIntensity) {
@@ -220,16 +214,37 @@ public struct ContentView: View {
                             }
                         }
                         .pickerStyle(SegmentedPickerStyle())
-                        .frame(maxWidth: 220)
+                        .frame(maxWidth: 240)
                     }
 
-                    HStack(spacing: 6) {
-                        Circle()
-                            .fill(Color.purple)
-                            .frame(width: 6, height: 6)
-                        Text("Ciclo: #\(audio.loopCycleCount)  |  Taxa: \(String(format: "%.3fx", audio.currentRateFactor))")
-                            .font(.system(size: 11, weight: .medium, design: .monospaced))
+                    HStack {
+                        HStack(spacing: 6) {
+                            Circle()
+                                .fill(Color.purple)
+                                .frame(width: 7, height: 7)
+                            Text("Ciclo: #\(audio.loopCycleCount) | Taxa: \(String(format: "%.3fx", audio.currentRateFactor))")
+                                .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                                .foregroundColor(.purple)
+                        }
+
+                        Spacer()
+
+                        Button(action: {
+                            audio.triggerInstantVariation()
+                        }) {
+                            HStack(spacing: 4) {
+                                Image(systemName: "waveform.path.badge.plus")
+                                Text("Ouvir Variação")
+                            }
+                            .font(.caption2)
+                            .fontWeight(.bold)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 6)
+                            .background(Color.purple.opacity(0.15))
                             .foregroundColor(.purple)
+                            .cornerRadius(8)
+                        }
+                        .disabled(!audio.isPlaying)
                     }
                     .padding(.top, 2)
                 }
@@ -241,7 +256,7 @@ public struct ContentView: View {
                 .fill(Color(UIColor.secondarySystemGroupedBackground))
                 .overlay(
                     RoundedRectangle(cornerRadius: 16)
-                        .stroke(audio.isAntiDetectionEnabled ? Color.purple.opacity(0.35) : Color.clear, lineWidth: 1.5)
+                        .stroke(audio.isAntiDetectionEnabled ? Color.purple.opacity(0.4) : Color.clear, lineWidth: 1.5)
                 )
         )
     }
@@ -336,7 +351,7 @@ public struct ContentView: View {
                     .fontWeight(.bold)
                     .foregroundColor(.white)
 
-                Text("Processamento 100% local e ultra rápido")
+                Text("Processamento ultrarrápido direto da galeria")
                     .font(.caption)
                     .foregroundColor(.white.opacity(0.75))
             }
@@ -347,8 +362,6 @@ public struct ContentView: View {
             )
         }
     }
-
-    // MARK: - Helpers
 
     private func formatTime(_ seconds: TimeInterval) -> String {
         guard seconds.isFinite, !seconds.isNaN else { return "00:00" }
