@@ -86,7 +86,7 @@ public struct ContentView: View {
                     .font(.system(size: 20, weight: .bold, design: .rounded))
                     .tracking(1.2)
             }
-            Text("Lives sem bloqueio • iPhone 11 otimizado")
+            Text("Lives sem bloqueio - iPhone 11 otimizado")
                 .font(.footnote)
                 .foregroundColor(.secondary)
         }
@@ -207,7 +207,7 @@ public struct ContentView: View {
                     VStack(alignment: .leading, spacing: 2) {
                         Text("Modo Live Anti-Deteccao")
                             .font(.system(size: 15, weight: .semibold))
-                        Text(audio.isAntiDetectionEnabled ? "Modula a cada 7s — Anti-Bot TikTok" : "Desativado — Loop identico")
+                        Text(audio.isAntiDetectionEnabled ? "Modula a cada 7s - Anti-Bot TikTok" : "Desativado - Loop identico")
                             .font(.caption2)
                             .foregroundColor(.secondary)
                     }
@@ -366,7 +366,7 @@ public struct ContentView: View {
             Color.black.opacity(0.6).ignoresSafeArea()
 
             VStack(spacing: 18) {
-                ProgressView(value: Double(processingProgress))
+                ProgressView(value: Double(processingProgress), total: 1.0)
                     .progressViewStyle(LinearProgressViewStyle(tint: .blue))
                     .frame(width: 200)
 
@@ -378,7 +378,7 @@ public struct ContentView: View {
                     .font(.system(size: 16, weight: .bold, design: .monospaced))
                     .foregroundColor(.white)
 
-                Text("Leitura direta da galeria — sem copias de disco")
+                Text("Leitura direta da galeria - sem copias de disco")
                     .font(.caption)
                     .foregroundColor(.white.opacity(0.75))
             }
