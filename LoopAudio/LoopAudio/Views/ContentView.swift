@@ -8,6 +8,7 @@ public struct ContentView: View {
     @State private var processingProgress: Float = 0
     @State private var alertMessage: String?
     @State private var showAlert = false
+    @State private var modulationPulse = false
 
     public init() {}
 
@@ -54,14 +55,26 @@ public struct ContentView: View {
                 dismissButton: .default(Text("OK"))
             )
         }
-        .onChange(of: audio.errorMessage) { msg in
-            if let msg = msg {
-                alertMessage = msg
+        .onChange(of: audio.errorMessage) { _, newMsg in
+            if let newMsg = newMsg {
+                alertMessage = newMsg
                 showAlert = true
                 audio.errorMessage = nil
             }
         }
+        .onChange(of: audio.currentRateFactor) { _, _ in
+            withAnimation(.easeInOut(duration: 0.3)) {
+                modulationPulse = true
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+                withAnimation(.easeInOut(duration: 0.3)) {
+                    modulationPulse = false
+                }
+            }
+        }
     }
+
+    // MARK: - Header
 
     private var headerSection: some View {
         VStack(spacing: 6) {
@@ -73,12 +86,14 @@ public struct ContentView: View {
                     .font(.system(size: 20, weight: .bold, design: .rounded))
                     .tracking(1.2)
             }
-            Text("Otimizado para iPhone 11 & Lives sem Bloqueio")
+            Text("Lives sem bloqueio • iPhone 11 otimizado")
                 .font(.footnote)
                 .foregroundColor(.secondary)
         }
         .padding(.top, 4)
     }
+
+    // MARK: - Track Info
 
     private var trackInfoSection: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -141,6 +156,8 @@ public struct ContentView: View {
         .shadow(color: Color.black.opacity(0.04), radius: 6, x: 0, y: 2)
     }
 
+    // MARK: - Controles de Playback
+
     private var playbackControlsSection: some View {
         HStack(spacing: 16) {
             Button(action: { audio.play() }) {
@@ -177,6 +194,8 @@ public struct ContentView: View {
         }
     }
 
+    // MARK: - Anti-Deteccao Live
+
     private var antiDetectionSection: some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack {
@@ -186,9 +205,9 @@ public struct ContentView: View {
                         .foregroundColor(audio.isAntiDetectionEnabled ? .purple : .secondary)
 
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("Modo Live Anti-Detecção")
+                        Text("Modo Live Anti-Deteccao")
                             .font(.system(size: 15, weight: .semibold))
-                        Text(audio.isAntiDetectionEnabled ? "Modulação a cada 7s (Anti-Bot TikTok/Kwai)" : "Desativado (Loop idêntico)")
+                        Text(audio.isAntiDetectionEnabled ? "Modula a cada 7s — Anti-Bot TikTok/Kwai" : "Desativado — Loop identico")
                             .font(.caption2)
                             .foregroundColor(.secondary)
                     }
@@ -222,7 +241,8 @@ public struct ContentView: View {
                             Circle()
                                 .fill(Color.purple)
                                 .frame(width: 7, height: 7)
-                            Text("Ciclo: #\(audio.loopCycleCount) | Taxa: \(String(format: "%.3fx", audio.currentRateFactor))")
+                                .scaleEffect(modulationPulse ? 1.6 : 1.0)
+                            Text("Ciclo: #\(audio.loopCycleCount)  |  Taxa: \(String(format: "%.3fx", audio.currentRateFactor))")
                                 .font(.system(size: 12, weight: .semibold, design: .monospaced))
                                 .foregroundColor(.purple)
                         }
@@ -234,7 +254,7 @@ public struct ContentView: View {
                         }) {
                             HStack(spacing: 4) {
                                 Image(systemName: "waveform.path.badge.plus")
-                                Text("Ouvir Variação")
+                                Text("Ouvir Variacao")
                             }
                             .font(.caption2)
                             .fontWeight(.bold)
@@ -260,6 +280,8 @@ public struct ContentView: View {
                 )
         )
     }
+
+    // MARK: - Volume
 
     private var volumeSection: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -291,6 +313,8 @@ public struct ContentView: View {
         .cornerRadius(16)
     }
 
+    // MARK: - Loop Toggle
+
     private var loopToggleSection: some View {
         HStack {
             HStack(spacing: 12) {
@@ -299,7 +323,7 @@ public struct ContentView: View {
                     .foregroundColor(audio.isLoopEnabled ? .green : .secondary)
 
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("Loop Contínuo")
+                    Text("Loop Continuo")
                         .font(.system(size: 16, weight: .medium))
                     Text(audio.isLoopEnabled ? "Reinicia sem parar" : "Reproduz apenas uma vez")
                         .font(.caption)
@@ -315,12 +339,14 @@ public struct ContentView: View {
         .cornerRadius(16)
     }
 
+    // MARK: - Botao Picker
+
     private var pickerButtonSection: some View {
         Button(action: { showingPicker = true }) {
             HStack(spacing: 10) {
                 Image(systemName: audio.currentTrack == nil ? "plus.circle.fill" : "arrow.triangle.2.circlepath")
                     .font(.system(size: 18, weight: .bold))
-                Text(audio.currentTrack == nil ? "Adicionar Vídeo da Fototeca" : "Escolher Outro Vídeo")
+                Text(audio.currentTrack == nil ? "Adicionar Video da Fototeca" : "Escolher Outro Video")
                     .font(.system(size: 16, weight: .semibold))
             }
             .foregroundColor(.white)
@@ -333,25 +359,26 @@ public struct ContentView: View {
         .padding(.top, 4)
     }
 
+    // MARK: - Overlay de Processamento
+
     private var processingOverlay: some View {
         ZStack {
-            Color.black.opacity(0.55).ignoresSafeArea()
+            Color.black.opacity(0.6).ignoresSafeArea()
 
-            VStack(spacing: 16) {
+            VStack(spacing: 18) {
                 ProgressView(value: Double(processingProgress))
                     .progressViewStyle(LinearProgressViewStyle(tint: .blue))
-                    .frame(width: 180)
+                    .frame(width: 200)
 
-                Text("Extraindo áudio do vídeo...")
+                Text("Extraindo audio do video...")
                     .font(.headline)
                     .foregroundColor(.white)
 
-                Text("\(Int(processingProgress * 100))% concluído")
-                    .font(.subheadline)
-                    .fontWeight(.bold)
+                Text("\(Int(processingProgress * 100))% concluido")
+                    .font(.system(size: 16, weight: .bold, design: .monospaced))
                     .foregroundColor(.white)
 
-                Text("Processamento ultrarrápido direto da galeria")
+                Text("Leitura direta da galeria — sem copias de disco")
                     .font(.caption)
                     .foregroundColor(.white.opacity(0.75))
             }
@@ -362,6 +389,8 @@ public struct ContentView: View {
             )
         }
     }
+
+    // MARK: - Helpers
 
     private func formatTime(_ seconds: TimeInterval) -> String {
         guard seconds.isFinite, !seconds.isNaN else { return "00:00" }
