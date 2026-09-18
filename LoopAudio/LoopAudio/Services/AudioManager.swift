@@ -6,15 +6,15 @@ import Combine
 public enum AntiDetectionIntensity: String, CaseIterable, Identifiable, Codable {
     case natural = "Natural"
     case balanced = "Moderado"
-    case shielded = "Blindado (Audível)"
+    case shielded = "Blindado (Audivel)"
 
     public var id: String { rawValue }
 
     public var rateRange: ClosedRange<Float> {
         switch self {
-        case .natural: return 0.980...1.020   // ±2.0%
-        case .balanced: return 0.955...1.045  // ±4.5% (Recomendado)
-        case .shielded: return 0.930...1.070  // ±7.0% (Audível e anti-ban máximo)
+        case .natural: return 0.980...1.020   // +/-2.0%
+        case .balanced: return 0.955...1.045  // +/-4.5% (Recomendado)
+        case .shielded: return 0.930...1.070  // +/-7.0% (Claramente audivel e anti-ban maximo)
         }
     }
 
@@ -55,119 +55,109 @@ public final class AudioManager: NSObject, ObservableObject, AVAudioPlayerDelega
         }
     }
 
-    // MARK: - Modo Live Anti-Detecção 2.0
     @Published public var isAntiDetectionEnabled: Bool = true {
         didSet {
+            UserDefaults.standard.set(isAntiDetectionEnabled, forKey: "LoopAudio_antiDetection")
             updateLoopMode()
-            if isAntiDetectionEnabled {
-                applyRandomizedParameters()
+            if isAntiDetectionEnabled && isPlaying {
                 startDriftTimer()
+                applyRandomizedParameters()
             } else {
                 stopDriftTimer()
-                currentRateFactor = 1.0
-                audioPlayer?.rate = 1.0
-                applyVolume()
+                resetModulation()
             }
-            UserDefaults.standard.set(isAntiDetectionEnabled, forKey: "LoopAudio_isAntiDetectionEnabled")
         }
     }
 
-    @Published public var antiDetectionIntensity: AntiDetectionIntensity = .shielded {
+    @Published public var antiDetectionIntensity: AntiDetectionIntensity = .balanced {
         didSet {
             if let encoded = try? JSONEncoder().encode(antiDetectionIntensity) {
-                UserDefaults.standard.set(encoded, forKey: "LoopAudio_antiDetectionIntensity")
+                UserDefaults.standard.set(encoded, forKey: "LoopAudio_intensity")
             }
-            if isAntiDetectionEnabled {
+            if isAntiDetectionEnabled && isPlaying {
                 applyRandomizedParameters()
             }
         }
     }
-
-    @Published public private(set) var loopCycleCount: Int = 1
-    @Published public private(set) var currentRateFactor: Float = 1.0
-    @Published public private(set) var lastModulationTime: Date = Date()
 
     @Published public private(set) var currentTrack: AudioTrackInfo?
     @Published public private(set) var currentTime: TimeInterval = 0
     @Published public var errorMessage: String?
 
+    @Published public private(set) var currentRateFactor: Float = 1.0
+    @Published public private(set) var loopCycleCount: Int = 1
+    
     private var audioPlayer: AVAudioPlayer?
     private var progressTimer: AnyCancellable?
     private var driftTimer: AnyCancellable?
     private var currentJitterVolume: Float = 1.0
+    private var lastModulationTime: Date = Date()
 
-    override private init() {
+    private override init() {
         super.init()
-        let defaults = UserDefaults.standard
-        self.isLoopEnabled = defaults.object(forKey: "LoopAudio_isLoopEnabled") as? Bool ?? true
-        self.volume = defaults.object(forKey: "LoopAudio_volume") as? Float ?? 1.0
-        self.isAntiDetectionEnabled = defaults.object(forKey: "LoopAudio_isAntiDetectionEnabled") as? Bool ?? true
-
-        if let data = defaults.data(forKey: "LoopAudio_antiDetectionIntensity"),
-           let intensity = try? JSONDecoder().decode(AntiDetectionIntensity.self, from: data) {
-            self.antiDetectionIntensity = intensity
-        }
-
         setupAudioSession()
         setupRemoteCommands()
         setupInterruptionObserver()
+
+        isLoopEnabled = UserDefaults.standard.bool(forKey: "LoopAudio_isLoopEnabled")
+        if UserDefaults.standard.object(forKey: "LoopAudio_volume") != nil {
+            volume = UserDefaults.standard.float(forKey: "LoopAudio_volume")
+        }
+        if UserDefaults.standard.object(forKey: "LoopAudio_antiDetection") != nil {
+            isAntiDetectionEnabled = UserDefaults.standard.bool(forKey: "LoopAudio_antiDetection")
+        }
+        if let data = UserDefaults.standard.data(forKey: "LoopAudio_intensity"),
+           let decoded = try? JSONDecoder().decode(AntiDetectionIntensity.self, from: data) {
+            antiDetectionIntensity = decoded
+        }
+
         loadPersistedTrack()
     }
 
-    public func setupAudioSession() {
+    private func setupAudioSession() {
         do {
             let session = AVAudioSession.sharedInstance()
             try session.setCategory(.playback, mode: .default, options: [.mixWithOthers])
-            try session.setActive(true, options: .notifyOthersOnDeactivation)
+            try session.setActive(true)
         } catch {
-            print("[AudioManager] Erro ao configurar sessão: \(error.localizedDescription)")
-            DispatchQueue.main.async {
-                self.errorMessage = "Falha ao ativar sessão de áudio: \(error.localizedDescription)"
-            }
+            print("[AudioManager] Erro ao configurar sessao de audio: \(error.localizedDescription)")
         }
     }
 
     public func loadAudio(track: AudioTrackInfo, startImmediately: Bool = true) {
-        stop()
-
         guard let url = audioFileURL(for: track.localFileName) else {
             DispatchQueue.main.async {
-                self.errorMessage = "Arquivo de áudio não encontrado no dispositivo."
+                self.errorMessage = "Arquivo de audio nao encontrado."
             }
             return
         }
 
         do {
-            setupAudioSession()
             let player = try AVAudioPlayer(contentsOf: url)
             player.delegate = self
+            
             player.enableRate = true
-
+            
             self.audioPlayer = player
             self.currentTrack = track
             self.currentTime = 0
             self.loopCycleCount = 1
-            self.errorMessage = nil
+            self.currentRateFactor = 1.0
+            self.currentJitterVolume = 1.0
 
             updateLoopMode()
             applyVolume()
-
-            if isAntiDetectionEnabled {
-                applyRandomizedParameters()
-            }
-
-            player.prepareToPlay()
-
             savePersistedTrack(track)
-            updateNowPlayingInfo()
 
             if startImmediately {
                 play()
+            } else {
+                updateNowPlayingInfo()
             }
+
         } catch {
-            print("[AudioManager] Erro ao criar AVAudioPlayer: \(error.localizedDescription)")
             DispatchQueue.main.async {
-                self.errorMessage = "Erro ao carregar áudio: \(error.localizedDescription)"
+                self.errorMessage = "Nao foi possivel carregar o audio: \(error.localizedDescription)"
             }
         }
     }
@@ -177,37 +167,39 @@ public final class AudioManager: NSObject, ObservableObject, AVAudioPlayerDelega
         setupAudioSession()
 
         if isAntiDetectionEnabled {
-            applyRandomizedParameters()
+            if player.currentTime == 0 {
+                applyRandomizedParameters()
+            }
             startDriftTimer()
+        } else {
+            resetModulation()
         }
 
-        if player.play() {
-            isPlaying = true
-            startProgressTimer()
-            updateNowPlayingInfo()
-        }
+        player.play()
+        isPlaying = true
+        startProgressTimer()
+        updateNowPlayingInfo()
     }
 
     public func pause() {
-        guard let player = audioPlayer, isPlaying else { return }
-        player.pause()
+        audioPlayer?.pause()
         isPlaying = false
         stopProgressTimer()
         stopDriftTimer()
-        currentTime = player.currentTime
         updateNowPlayingInfo()
     }
 
     public func stop() {
+        audioPlayer?.stop()
         if let player = audioPlayer {
-            player.stop()
             player.currentTime = 0
+            currentTime = 0
         }
         isPlaying = false
-        currentTime = 0
         loopCycleCount = 1
         stopProgressTimer()
         stopDriftTimer()
+        resetModulation()
         updateNowPlayingInfo()
     }
 
@@ -221,8 +213,14 @@ public final class AudioManager: NSObject, ObservableObject, AVAudioPlayerDelega
     }
 
     private func applyVolume() {
-        let actual = isAntiDetectionEnabled ? (volume * currentJitterVolume) : volume
-        audioPlayer?.volume = max(0.0, min(1.0, actual))
+        audioPlayer?.volume = volume * currentJitterVolume
+    }
+
+    private func resetModulation() {
+        currentRateFactor = 1.0
+        currentJitterVolume = 1.0
+        audioPlayer?.rate = 1.0
+        applyVolume()
     }
 
     public func applyRandomizedParameters() {
@@ -237,7 +235,6 @@ public final class AudioManager: NSObject, ObservableObject, AVAudioPlayerDelega
         applyVolume()
     }
 
-    // Gatilho para o usuário testar e ouvir a variação imediatamente
     public func triggerInstantVariation() {
         guard let player = audioPlayer else { return }
         let current = currentRateFactor
@@ -253,7 +250,6 @@ public final class AudioManager: NSObject, ObservableObject, AVAudioPlayerDelega
         stopDriftTimer()
         guard isAntiDetectionEnabled else { return }
 
-        // Modulação frequente a cada 7 segundos para janelas de 15-20s de live
         driftTimer = Timer.publish(every: 7.0, on: .main, in: .common)
             .autoconnect()
             .sink { [weak self] _ in
@@ -313,9 +309,9 @@ public final class AudioManager: NSObject, ObservableObject, AVAudioPlayerDelega
 
     public func audioPlayerDecodeErrorDidOccur(_ player: AVAudioPlayer, error: Error?) {
         let msg = error?.localizedDescription ?? "Erro desconhecido"
-        print("[AudioManager] Erro de decodificação: \(msg)")
+        print("[AudioManager] Erro de decodificacao: \(msg)")
         DispatchQueue.main.async {
-            self.errorMessage = "Erro ao decodificar áudio: \(msg)"
+            self.errorMessage = "Erro ao decodificar audio: \(msg)"
         }
         stop()
     }
